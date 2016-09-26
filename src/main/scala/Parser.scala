@@ -4,7 +4,6 @@ import scala.collection.mutable
   * Created by matt.fenwick on 9/8/16.
   */
 
-// TODO `var` instead of `val` in order to allow mutual recursion
 class Parser[+E, S, T, +A](val parse: (List[T], S) => MaybeError[E, (List[T], S, A)]) {
   /*
   def <*>[B, C](implicit ev: A =:= (B => C), p: Parser[E, S, T, B]): Parser[E, S, T, C] = {
@@ -69,15 +68,7 @@ object Parser {
   }
 
   def check[E, S, T, A](predicate: A => Boolean, parser: => Parser[E, S, T, A]): Parser[E, S, T, A] = {
-    new Parser((xs, s) => parser.parse(xs, s) match {
-      case Zero => Zero
-      case Error(e) => Error(e)
-      case Success(x) => if (predicate(x._3)) {
-        Success(x)
-      } else {
-        Zero
-      }
-    })
+    bind(parser, (value: A) => if (predicate(value)) pure(value) else zero())
   }
 
   def many0[E, S, T, A](parser: => Parser[E, S, T, A]): Parser[E, S, T, List[A]] = {
