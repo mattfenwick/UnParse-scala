@@ -8,7 +8,7 @@ object JSONParser {
   type E = List[(String, S)] // TODO or maybe List[String] ?
   type T = Char
 
-  val itemizer = position[E]
+  val itemizer = position
   import itemizer._
 
   def quantity[E, S, T, A](parser: Parser[E, S, T, A], num: Int): Parser[E, S, T, List[A]] = {

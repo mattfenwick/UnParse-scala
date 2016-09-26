@@ -23,12 +23,16 @@ private object Helpers {
 }
 
 object Parser {
-  def fmap[E, S, T, A, B](g: A => B, parser: => Parser[E, S, T, A]): Parser[E, S, T, B] = {
-    new Parser((xs, s) => parser.parse(xs, s).fmap(r => (r._1, r._2, g(r._3))))
-  }
-
   implicit def pure[E, S, T, A](x: A): Parser[E, S, T, A] = {
     new Parser((xs, s) => Helpers.good(xs, s, x))
+  }
+
+  def zero[S, T](): Parser[Nothing, S, T, Nothing] = new Parser((_, _) => Zero)
+
+  def error[E, S, T, A](e: E): Parser[E, S, T, A] = new Parser((_, _) => Error(e))
+
+  def fmap[E, S, T, A, B](g: A => B, parser: => Parser[E, S, T, A]): Parser[E, S, T, B] = {
+    new Parser((xs, s) => parser.parse(xs, s).fmap(r => (r._1, r._2, g(r._3))))
   }
 
   def bind[E, S, T, A, B](parser: => Parser[E, S, T, A], g: A => Parser[E, S, T, B]): Parser[E, S, T, B] = {
@@ -39,37 +43,31 @@ object Parser {
     })
   }
 
-  def error[E, S, T, A](e: E): Parser[E, S, T, A] = {
-    new Parser((_, _) => Error(e))
-  }
-
-  def catchError[E, E2, S, T, A](f: E => Parser[E2, S, T, A], parser: => Parser[E, S, T, A]): Parser[E2, S, T, A] = {
-    new Parser((xs, s) => parser.parse(xs, s) match {
-      case Zero => Zero
-      case Error(e) => f(e).parse(xs, s)
-      case Success(r) => Success(r)
-    })
-  }
-
-  def mapError[E, E2, S, T, A](f: E => E2, parser: => Parser[E, S, T, A]): Parser[E2, S, T, A] = {
-    catchError(error[E2, S, T, A] _ compose f, parser)
-  }
-
-  def put[E, S, T](xs: List[T]): Parser[E, S, T, Unit] = {
-    new Parser((_, s) => Helpers.good(xs, s, Unit))
-  }
-
-  def putState[E, S, T](s: S): Parser[E, S, T, Unit] = {
-    new Parser((xs, _) => Helpers.good(xs, s, Unit))
-  }
-
-  def updateState[E, S, T](g: S => S): Parser[E, S, T, Unit] = {
-    new Parser((xs, s) => Helpers.good(xs, g(s), Unit))
-  }
-
   def check[E, S, T, A](predicate: A => Boolean, parser: => Parser[E, S, T, A]): Parser[E, S, T, A] = {
     bind(parser, (value: A) => if (predicate(value)) pure(value) else zero())
   }
+
+  def update[S, T](f: List[T] => List[T]): Parser[Nothing, S, T, List[T]] = {
+    new Parser((xs, s) => {
+      val ys = f(xs)
+      Helpers.good(ys, s, ys)
+    })
+  }
+
+  def get[S, T](): Parser[Nothing, S, T, List[T]] = update(identity)
+
+  def put[S, T](xs: List[T]): Parser[Nothing, S, T, List[T]] = update(Function.const(xs))
+
+  def updateState[S, T](g: S => S): Parser[Nothing, S, T, S] = {
+    new Parser((xs, s) => {
+      val newState = g(s)
+      Helpers.good(xs, newState, newState)
+    })
+  }
+
+  def getState[S, T](): Parser[Nothing, S, T, S] = updateState(identity)
+
+  def putState[S, T](s: S): Parser[Nothing, S, T, S] = updateState(Function.const(s))
 
   def many0[E, S, T, A](parser: => Parser[E, S, T, A]): Parser[E, S, T, List[A]] = {
     // TODO wow, do a better job here
@@ -146,22 +144,14 @@ object Parser {
     app2((_: A) => (y: B) => y, p1, p2)
   }
 
-  def zero[E, S, T, A](): Parser[E, S, T, A] = {
-    new Parser((_, _) => Zero)
-  }
-
-  def get[E, S, T](): Parser[E, S, T, List[T]] = {
-    new Parser((xs, s) => Helpers.good(xs, s, xs))
-  }
-
-  def getState[E, S, T](): Parser[E, S, T, S] = {
-    new Parser((xs, s) => Helpers.good(xs, s, s))
-  }
+  // TODO
+  // def repeat
 
   def lookahead[E, S, T, A](parser: => Parser[E, S, T, A]): Parser[E, S, T, A] = {
+    val first: (A, List[T], S) => A = (a, _, _) => a
     bind(get(), (xs: List[T]) =>
       bind(getState(), (s: S) =>
-        seq2L(parser, seq(List[Parser[E, S, T, Unit]](put(xs), putState(s))))))
+        app3(first.curried, parser, put(xs), putState(s))))
   }
 
   def not0[E, S, T, A](parser: => Parser[E, S, T, A]): Parser[E, S, T, Unit] = {
@@ -192,8 +182,29 @@ object Parser {
     alt(List(parser, pure(defaultValue)))
   }
 
+  def catchError[E, E2, S, T, A](f: E => Parser[E2, S, T, A], parser: => Parser[E, S, T, A]): Parser[E2, S, T, A] = {
+    new Parser((xs, s) => parser.parse(xs, s) match {
+      case Zero => Zero
+      case Error(e) => f(e).parse(xs, s)
+      case Success(r) => Success(r)
+    })
+  }
+
+  def mapError[E, E2, S, T, A](f: E => E2, parser: => Parser[E, S, T, A]): Parser[E2, S, T, A] = {
+    catchError(error[E2, S, T, A] _ compose f, parser)
+  }
+
   def commit[E, S, T, A](e: E, parser: => Parser[E, S, T, A]): Parser[E, S, T, A] = {
     alt(List(parser, error(e)))
+  }
+
+  //  def cut[E, S, T, A](message: E, parser: => Parser[List[(E, S)], S, T, A]): Parser[List[(E, S)], S, T, A] = { // TODO
+  def cut[S, T, A](message: String, parser: => Parser[List[(String, S)], S, T, A]): Parser[List[(String, S)], S, T, A] = {
+    bind(getState(), (state: S) => commit(List((message, state)), parser))
+  }
+
+  def addError[E, S, T, A](e: E, parser: => Parser[List[(E, S)], S, T, A]): Parser[List[(E, S)], S, T, A] = {
+    bind(getState(), (state: S) => mapError((es: List[(E, S)]) => (e, state) :: es, parser))
   }
 
   def _buildSepByValue[A, B] = (first: A) => (pairs: List[(B, A)]) => {
@@ -212,17 +223,17 @@ object Parser {
     optionalV(sepBy1(parser, separator), (List(), List()))
   }
 
-  class Itemizer[E, S, T](val f: (T, S) => S) {
-    val item: Parser[E, S, T, T] = new Parser((xs, s) => xs match {
+  class Itemizer[S, T](val f: (T, S) => S) {
+    val item: Parser[Nothing, S, T, T] = new Parser((xs, s) => xs match {
       case Nil => Zero
       case (y :: ys) => Helpers.good(ys, f(y, s), y)
     })
 
-    def literal(x: T): Parser[E, S, T, T] = check((y: T) => x == y, this.item)
-    def satisfy(predicate: T => Boolean): Parser[E, S, T, T] = check(predicate, this.item)
-    def not1[A](parser: => Parser[E, S, T, A]): Parser[E, S, T, T] = seq2R(not0(parser), this.item)
-    def string(elements: List[T]): Parser[E, S, T, List[T]] = seq(elements.map(this.literal))
-    def oneOf(elements: Set[T]): Parser[E, S, T, T] = satisfy(x => elements.contains(x))
+    def literal(x: T): Parser[Nothing, S, T, T] = check((y: T) => x == y, this.item)
+    def satisfy(predicate: T => Boolean): Parser[Nothing, S, T, T] = check(predicate, this.item)
+    def not1[E, A](parser: => Parser[E, S, T, A]): Parser[E, S, T, T] = seq2R(not0(parser), this.item)
+    def string(elements: List[T]): Parser[Nothing, S, T, List[T]] = seq(elements.map(this.literal))
+    def oneOf(elements: Set[T]): Parser[Nothing, S, T, T] = satisfy(x => elements.contains(x))
   }
 
   def _bump(char: Char, position: (Int, Int)): (Int, Int) = {
@@ -232,24 +243,15 @@ object Parser {
     }
   }
 
-  def basic[E, S, T](): Itemizer[E, S, T] = new Itemizer((_, s) => s)
-  def position[E](): Itemizer[E, (Int, Int), Char] = new Itemizer(_bump)
-  def count[E, T](): Itemizer[E, Int, T] = new Itemizer((_, s) => s + 1)
+  def basic[S, T](): Itemizer[S, T] = new Itemizer((_, s) => s)
+  def position(): Itemizer[(Int, Int), Char] = new Itemizer(_bump)
+  def count[T](): Itemizer[Int, T] = new Itemizer((_, s) => s + 1)
 
   // TODO some implicits?
 
   //implicit def partial2[A, B, C](f: (A, B) => C) = (a: A) => (b: B) => f(a, b)
   //implicit def partial3[A, B, C, D](f: (A, B, C) => D) = (a: A) => (b: B) => (c: C) => f(a, b, c)
   //implicit def partial4[A, B, C, D, E](f: (A, B, C, D) => E) = (a: A) => (b: B) => (c: C) => (d: D) => f(a, b, c, d)
-
-//  def cut[E, S, T, A](message: E, parser: => Parser[List[(E, S)], S, T, A]): Parser[List[(E, S)], S, T, A] = { // TODO
-  def cut[S, T, A](message: String, parser: => Parser[List[(String, S)], S, T, A]): Parser[List[(String, S)], S, T, A] = {
-    bind(getState(), (state: S) => commit(List((message, state)), parser))
-  }
-
-  def addError[E, S, T, A](e: E, parser: => Parser[List[(E, S)], S, T, A]): Parser[List[(E, S)], S, T, A] = {
-    bind(getState(), (state: S) => mapError((es: List[(E, S)]) => (e, state) :: es, parser))
-  }
 
   case class Node[S, +A](val name: String, val position: (S, S), val tree: A)
   def node[S, T, A](name: String, parser: => Parser[List[(String, S)], S, T, A]): Parser[List[(String, S)], S, T, Node[S, A]] = {
