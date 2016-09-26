@@ -4,6 +4,21 @@
 
 object Examples extends App {
   SomeParseExamples.jsonParsing()
+  TyingTheKnot.eg1()
+  //println(TyingTheKnot.v1.parse(List(1,2,3,4,5,8,8), 0))
+}
+
+object TyingTheKnot {
+  def eg1(): Unit = {
+    import Parser._
+    //def cons[T](x: T, xs: List[T]): List[T] = x :: xs
+    val cons = (x: Int, xs: List[Int]) => x :: xs
+    val thing = count[Int]().oneOf(List(1,2,3,4).toSet)
+    lazy val v1: Parser[String, Int, Int, List[Int]] = app2(cons.curried, thing, optionalV(v2, Nil))
+    lazy val v2: Parser[String, Int, Int, List[Int]] = app2(cons.curried, thing, optionalV(v1, Nil))
+
+    println(v1.parse(List(1,2,3,4,5,8,8), 0))
+  }
 }
 
 object SomeParseExamples {
