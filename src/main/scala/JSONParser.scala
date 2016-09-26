@@ -36,12 +36,12 @@ object JSONParser {
     case _ => pure(ds)
   }))
   val _number_1 = node[S, T, JSONNumber]("number", app4(JSONNumber.apply _ curried,
-    fmap[E, S, T, Char, Option[Char]]((c: Char) => Some(c), literal('-')),
+    fmap((c: Char) => Some(c), literal('-')),
     cut("digits", _integer),
     optional(_decimal),
     optional(_exponent)))
   val _number_2 = node[S, T, JSONNumber]("number", app4(JSONNumber.apply _ curried,
-    pure[E, S, T, Option[Char]](None),
+    pure(None),
     _integer,
     optional(_decimal),
     optional(_exponent)))
@@ -58,18 +58,14 @@ object JSONParser {
   val _escape = node[S, T, EscapeChar]("escape", app2(EscapeChar.apply _ curried, literal('\\'), cut("simple escape", oneOf("\\/bfnrt".toSet))))
   val _hexC = oneOf("0123456789abcdefABCDEF".toSet)
   val _unic = node[S, T, UnicodeEscape]("unicode escape", app2(UnicodeEscape.apply _ curried, string("\\u".toList), cut("4 hexidecimal digits", quantity(_hexC, 4))))
-  // TODO wow, this is so messed up.  definitely a better way to do this
-  def upcast[M[+_], V, U <: V](u: M[U]): M[V] = u
   val _jsonString = node[S, T, JSONString]("string", app3(JSONString.apply _ curried,
     literal('"'),
-    many0(alt[E, S, T, JSONNode[CharNode]](List(fmap(upcast[JSONNode, CharNode, SimpleChar], _char),
-      fmap(upcast[JSONNode, CharNode, EscapeChar], _escape),
-      fmap(upcast[JSONNode, CharNode, UnicodeEscape], _unic)))),
+    many0(alt(List(_char, _escape, _unic))),
     literal('"')))
   val _keywords = List("true", "false", "null")
-  val _keyword = node[S, T, JSONKeyword]("keyword", app(JSONKeyword.apply _, alt[E, S, T, List[Char]](_keywords.map((x: String) => string(x.toList)))))
+  val _keyword = node[S, T, JSONKeyword]("keyword", app(JSONKeyword.apply _, alt(_keywords.map((x: String) => string(x.toList)))))
 
-  def token[E, S, T, A](parser: Parser[E, S, T, A]): Parser[E, S, T, A] =  seq2L(parser, whitespace)
+  def token[E, S, T, A](parser: Parser[E, S, T, A]): Parser[E, S, T, A] = seq2L(parser, whitespace)
 
   val jsonString: Parser[E, S, T, JSONNode[JSONString]] = token(_jsonString)
   val number     = token(_number)
@@ -93,7 +89,6 @@ object JSONParser {
 
   case class JSONKVPair(val key: JSONNode[JSONString], val colon: Char, val value: JSONNode[JSONValue])
 
-  var jsonValue: Parser[E, S, T, JSONNode[JSONValue]] = Parser.error(List(("unimplemented", (0, 0))))
   val jsonKVPair = node[S, T, JSONKVPair]("key/value pair", app3(JSONKVPair.apply _ curried,
     jsonString,
     cut("colon", colon),
@@ -106,16 +101,8 @@ object JSONParser {
     oc,
     sepBy0(jsonKVPair, comma),
     cc))
-  jsonValue.parse = alt[E, S, T, JSONNode[JSONValue]](List(
-    fmap(upcast[JSONNode, JSONValue, JSONKeyword], keyword),
-    fmap(upcast[JSONNode, JSONValue, JSONNumber], number),
-    fmap(upcast[JSONNode, JSONValue, JSONString], jsonString),
-    fmap(upcast[JSONNode, JSONValue, JSONArray], jsonArray),
-    fmap(upcast[JSONNode, JSONValue, JSONObject], jsonObject)
-  )).parse
-  // TODO 1: use contravariant parameters to avoid obnoxious type declarations
-  // TODO 2: handle string escapes
-  // TODO 3: good error messaging
+  lazy val jsonValue: Parser[E, S, T, JSONNode[JSONValue]] = alt[E, S, T, JSONNode[JSONValue]](List(
+    keyword, number, jsonString, jsonArray, jsonObject))
   val _json = jsonValue
   val json = app3[E, S, T, List[Char], JSONNode[JSONValue], Unit, JSONNode[JSONValue]](
     (_: List[Char]) => (v: JSONNode[JSONValue]) => (_: Unit) => v,
