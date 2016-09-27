@@ -1,8 +1,10 @@
+package com.unparse_scala
+import com.unparse_scala.Parser._
+
 /**
   * Created by matt.fenwick on 9/17/16.
   */
 object JSONParser {
-  import Parser._
 
   type S = (Int, Int)
   type E = List[(String, S)] // TODO or maybe List[String] ?

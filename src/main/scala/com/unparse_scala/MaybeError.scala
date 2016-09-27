@@ -1,3 +1,5 @@
+package com.unparse_scala
+
 /**
   * Created by matt.fenwick on 9/8/16.
   */
