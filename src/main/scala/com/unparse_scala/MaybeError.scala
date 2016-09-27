@@ -37,4 +37,10 @@ object MaybeError {
       b.bind(y =>
         Success(f(x, y))))
   }
+  def app3[E, A, B, C, D](f: (A, B, C) => D, a: MaybeError[E, A], b: MaybeError[E, B], c: MaybeError[E, C]): MaybeError[E, D] = {
+    a.bind(x =>
+      b.bind(y =>
+        c.bind(z =>
+          Success(f(x, y, z)))))
+  }
 }
